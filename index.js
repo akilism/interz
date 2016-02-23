@@ -5,35 +5,34 @@ const csv = require("fast-csv");
 
 var intersections = {};
 
-geoclient.setApi('7e66478437762cefc8a569314c6af580','0de4b98b');
+geoclient.setApi("7e66478437762cefc8a569314c6af580","0de4b98b");
 
 const id = function(lat, lng) {
   return `${lat},${lng}`;
 };
 
 const name = function(onStreetName, crossStreetName) {
-  const onStreet = (onStreetName) ? onStreetName.toLowerCase() : '',
-        crossStreet = (crossStreetName) ? crossStreetName.toLowerCase() : '';
+  const onStreet = (onStreetName) ? onStreetName.toLowerCase() : "",
+        crossStreet = (crossStreetName) ? crossStreetName.toLowerCase() : "";
   return `${onStreet} and ${crossStreet}`;
 };
 
 const borough = function(brgh) {
     switch (brgh.toLowerCase()) {
-      case 'brooklyn':
+      case "brooklyn":
         return geoclient.BOROUGH.BROOKLYN;
-      case 'bronx':
+      case "bronx":
         return geoclient.BOROUGH.BRONX;
-      case 'manhattan':
+      case "manhattan":
         return geoclient.BOROUGH.MANHATTAN;
-      case 'queens':
+      case "queens":
         return geoclient.BOROUGH.QUEENS;
-      case 'staten island':
+      case "staten island":
         return geoclient.BOROUGH.STATEN_ISLAND;
     }
   };
 
 const intersectionExists = function(key) {
-//  const key = getKey(onStreet, crossStreet, zipCode);
   return (intersections[key] !== undefined);
 };
 
@@ -50,6 +49,20 @@ const setLocationDetails = function(crash, resp) {
   }
 
   return crash;
+};
+
+const sumIntersection = function(a, b) {
+	return { onStreetName: (a["onStreetName"]) ? a["onStreetName"] : b["onStreetName"],
+		crossStreetName: (a["crossStreetName"]) ? a["crossStreetName"] : b["crossStreetName"],
+    lat: (a["lat"]) ? a["lat"] : b["lat"],
+    lng: (a["lng"]) ? a["lng"] : b["lng"],
+    injuries: a["injuries"] + b["injuries"],
+    fatalities: a["fatalities"] + b["fatalities"],
+    zipCode: (a["zipCode"]) ? a["zipCode"] : b["zipCode"],
+    hasLocation: a["hasLocation"],
+    id: a["id"],
+    name: a["name"],
+    borough: (a["borough"]) ? a["borough"] : b["borough"]};
 };
 
 const geocodeCrash = function(crash) {
@@ -75,6 +88,7 @@ const lookupStreets = function(lat, lng) {
 };
 
 const formattedCrash = function(crash) {
+	console.log(crash);
   const onStreetName = crash["ON STREET NAME"],
         crossStreetName = crash["CROSS STREET NAME"],
         brgh = crash["BOROUGH"],
@@ -94,29 +108,55 @@ const formattedCrash = function(crash) {
 
 
 const processCrash = function(rawCrash) {
-  const crash = formattedCrash(rawCrash);
   return (crash.hasLocation) ?
     Promise.resolve(crash) : geocodeCrash(crash);
 };
 
 
-const getIntersections = function(url) {
-  console.log(url);
+// .pipe(_().map((s) => {
+    // 	console.log(s.toString());
+    // 	return s;
+    // }))
+    // .map((crash) => {
+    // 	console.log(crash.hasLocation);
+    // 	if(crash.hasLocation) {
+    // 		completeCrashes.push(crash);
+    // 	} else {
+    // 		incompleteCrashes.push(crash);
+    // 	}
+    // 	return crash;
+    // })
+    // .pipe(_())
+    // .on("data", (data) => { data.then((crash) => {
+    // 	return crash;
+    // }); })
+
+const processCrashes = function(url) {
   return new Promise((resolve, reject) => {
+  	var completeCrashes = [],
+  			incompleteCrashes = [];
+  	console.log(url);
     request(url)
-    .on("error", (err) => { reject(err); })
-    .pipe(csv({objectMode: true, headers: true}))
-    .on("data", (data) => { console.log(data); })
-    .on("end", () => { console.log("done"); resolve(true); });
+    // .on("error", (err) => { reject(err); })
+    // .pipe(csv({objectMode: true, headers: true}))
+    .pipe(_().map((crash) => {
+    	console.log("crash:", crash);
+    	return crash;
+    	// return formattedCrash(crash);
+    }))
+    .on("end", () => {
+    	console.log("complete crashes:", completeCrashes.length);
+    	console.log("incomplete crashes:", incompleteCrashes.length);
+    	resolve(true);
+    });
   });
 };
 
 
-getIntersections("http://hiddenfromsight.com/crashes_small.csv")
+processCrashes("http://hiddenfromsight.com/crashes_small.csv")
 .then((rawCrashes) => {
   console.log(rawCrashes);
-  running = false;
 })
 .catch((error) => {
-  console.log('ERROR: ', error);
+  console.log("ERROR: ", error);
 });
