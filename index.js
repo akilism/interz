@@ -3,21 +3,19 @@ const geoclient = require("nyc-geoclient");
 const request = require("request");
 const csv = require("fast-csv");
 
-var intersections = {};
-
 geoclient.setApi("7e66478437762cefc8a569314c6af580","0de4b98b");
 
-const id = function(lat, lng) {
+function id(lat, lng) {
   return `${lat},${lng}`;
 };
 
-const name = function(onStreetName, crossStreetName) {
+function name(onStreetName, crossStreetName) {
   const onStreet = (onStreetName) ? onStreetName.toLowerCase() : "",
         crossStreet = (crossStreetName) ? crossStreetName.toLowerCase() : "";
   return `${onStreet} and ${crossStreet}`;
 };
 
-const borough = function(brgh) {
+function borough(brgh) {
     switch (brgh.toLowerCase()) {
       case "brooklyn":
         return geoclient.BOROUGH.BROOKLYN;
@@ -32,11 +30,11 @@ const borough = function(brgh) {
     }
   };
 
-const intersectionExists = function(key) {
+function intersectionExists(key) {
   return (intersections[key] !== undefined);
 };
 
-const setLocationDetails = function(crash, resp) {
+function setLocationDetails(crash, resp) {
   var intsect = JSON.parse(resp).intersection,
       latitude = intsect.latitude,
       longitude = intsect.longitude;
@@ -44,6 +42,7 @@ const setLocationDetails = function(crash, resp) {
   if(latitude && longitude) {
     crash.lat = latitude;
     crash.lng = longitude;
+    crash.id = id(latitude, longitude);
     crash.hasLocation = true;
     return crash;
   }
@@ -51,7 +50,7 @@ const setLocationDetails = function(crash, resp) {
   return crash;
 };
 
-const sumIntersection = function(a, b) {
+function sumIntersection(a, b) {
 	return { onStreetName: (a["onStreetName"]) ? a["onStreetName"] : b["onStreetName"],
 		crossStreetName: (a["crossStreetName"]) ? a["crossStreetName"] : b["crossStreetName"],
     lat: (a["lat"]) ? a["lat"] : b["lat"],
@@ -62,10 +61,11 @@ const sumIntersection = function(a, b) {
     hasLocation: a["hasLocation"],
     id: a["id"],
     name: a["name"],
+    crashes: a["crashes"]++,
     borough: (a["borough"]) ? a["borough"] : b["borough"]};
 };
 
-const geocodeCrash = function(crash) {
+function geocodeCrash(crash) {
   return new Promise((resolve, reject) => {
     geoclient.intersection(crash.onStreetName,
                     crash.crossStreetName,
@@ -81,14 +81,13 @@ const geocodeCrash = function(crash) {
   });
 };
 
-const lookupStreets = function(lat, lng) {
+function lookupStreets(lat, lng) {
   return new Promise((resolve, reject) => {
 
   });
 };
 
-const formattedCrash = function(crash) {
-	console.log(crash);
+function formattedCrash(crash) {
   const onStreetName = crash["ON STREET NAME"],
         crossStreetName = crash["CROSS STREET NAME"],
         brgh = crash["BOROUGH"],
@@ -106,56 +105,66 @@ const formattedCrash = function(crash) {
            borough: borough(brgh) };
 };
 
-
-const processCrash = function(rawCrash) {
-  return (crash.hasLocation) ?
-    Promise.resolve(crash) : geocodeCrash(crash);
-};
-
-
-// .pipe(_().map((s) => {
-    // 	console.log(s.toString());
-    // 	return s;
-    // }))
-    // .map((crash) => {
-    // 	console.log(crash.hasLocation);
-    // 	if(crash.hasLocation) {
-    // 		completeCrashes.push(crash);
-    // 	} else {
-    // 		incompleteCrashes.push(crash);
-    // 	}
-    // 	return crash;
-    // })
-    // .pipe(_())
-    // .on("data", (data) => { data.then((crash) => {
-    // 	return crash;
-    // }); })
-
-const processCrashes = function(url) {
+function fetchCrashes(url) {
   return new Promise((resolve, reject) => {
   	var completeCrashes = [],
   			incompleteCrashes = [];
   	console.log(url);
+
     request(url)
-    // .on("error", (err) => { reject(err); })
-    // .pipe(csv({objectMode: true, headers: true}))
-    .pipe(_().map((crash) => {
-    	console.log("crash:", crash);
-    	return crash;
-    	// return formattedCrash(crash);
-    }))
+    .on("error", (err) => { reject(err); })
+    .pipe(csv({objectMode: true, headers: true}))
+    .pipe(_().map(formattedCrash))
+    .on('data', (crash) => {
+      if(crash.hasLocation) {
+        completeCrashes.push(crash)
+      } else {
+        incompleteCrashes.push(crash);
+      }
+      return null;
+    })
     .on("end", () => {
-    	console.log("complete crashes:", completeCrashes.length);
-    	console.log("incomplete crashes:", incompleteCrashes.length);
-    	resolve(true);
+     console.log("complete crashes:", completeCrashes.length);
+     console.log("incomplete crashes:", incompleteCrashes.length);
+      resolve({complete: completeCrashes, incomplete: incompleteCrashes});
     });
   });
 };
 
+function intersections(acc, v, i) {
+  if(acc[v.id]) {
+    acc[v.id] = sumIntersection(acc[v.id], v);
+  } else {
+    v.crashes = 1;
+    acc[v.id] = v;
+  }
+  return acc;
+}
 
-processCrashes("http://hiddenfromsight.com/crashes_small.csv")
-.then((rawCrashes) => {
-  console.log(rawCrashes);
+function processCompletedCrashes(crashes, currentIntersections) {
+  return crashes.reduce(intersections, currentIntersections);
+}
+
+function validCrash(crash) {
+  return crash.borough && crash.onStreetName && crash.crossStreetName && crash.zipCode;
+}
+
+function geocodeCrashes(incomplete, currentIntersections) {
+  //batch these calls to geocodeCrash
+  return Promise.all(incomplete.filter(validCrash).map(geocodeCrash))
+    .then((crashes) => {
+      return processCompletedCrashes(crashes, currentIntersections);
+    });
+}
+
+fetchCrashes("http://hiddenfromsight.com/crashes_medium.csv")
+.then((crashes) => {
+  var intersections = processCompletedCrashes(crashes.complete, {});
+  console.log(crashes.complete.length, ':', Object.keys(intersections).length);
+  return geocodeCrashes(crashes.incomplete, intersections);
+})
+.then((finalIntersections) => {
+  console.log('final: ', Object.keys(finalIntersections).length);
 })
 .catch((error) => {
   console.log("ERROR: ", error);
